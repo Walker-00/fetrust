@@ -11,7 +11,11 @@ use std::path::Path;
 use std::{env, fs};
 
 fn main() {
-    let infos = crate::resource::sys::init();
+    // Parse CLI arguments
+    let args: Vec<String> = env::args().collect();
+    let probe_mode = args.iter().any(|arg| arg == "--probe" || arg == "--full");
+
+    let infos = crate::resource::sys::init(probe_mode);
     let config_file = format!(
         "{}/.config/fetrust/{}",
         env::var("HOME").unwrap_or_else(|_| ".".to_string()),
@@ -37,6 +41,7 @@ fn main() {
     let mut user_host_value: Option<String> = None;
 
     let info_configs = [
+        ("host_model", "Host", vec!["host_model"]),
         ("os", "OS", vec!["os", " ", "release"]),
         ("kernel", "Kernel", vec!["kernel_name", " ", "kernel"]),
         ("shell", "Shell", vec!["shell"]),
@@ -45,6 +50,8 @@ fn main() {
         ("resolution", "Resolution", vec!["resolution"]),
         ("cpu_type", "CPU", vec!["cpu_type"]),
         ("memory", "Memory", vec!["memory"]),
+        ("gpu", "GPU", vec!["gpu"]),
+        ("terminal", "Terminal", vec!["terminal"]),
         ("desktop", "DE", vec!["desktop"]),
         ("theme", "Theme", vec!["theme"]),
         ("icon", "Icons", vec!["icon"]),
@@ -64,6 +71,9 @@ fn main() {
                             let field_value = match field_name.as_str() {
                                 "username" => &infos.username,
                                 "hostname" => &infos.hostname,
+                                "host_model" => &infos.host_model,
+                                "terminal" => &infos.terminal,
+                                "gpu" => &infos.gpu,
                                 _ => field_name.as_str(),
                             };
                             content.push_str(field_value);
@@ -109,6 +119,9 @@ fn main() {
                                     "font" => &infos.font_name,
                                     "cursor" => &infos.cursor_theme,
                                     "desktop" => &infos.desktop,
+                                    "host_model" => &infos.host_model,
+                                    "terminal" => &infos.terminal,
+                                    "gpu" => &infos.gpu,
                                     _ => field_name.as_str(),
                                 };
                                 content.push_str(field_value);

@@ -1,5 +1,6 @@
 {
-	"user_a_host_name":	[["username", " @ ", "hostname"], "rand"],
+	"user_a_host_name":	[["username", "@", "hostname"], "rand"],
+	"host_model":			[["host_model"], "rand"],
 	"os":				  [["os", " ", "os_release"], "rand"],
 	"kernel":			[["kernel_name", " ", "kernel"], "rand"],
 	"shell":			[["shell"], "rand"],
@@ -8,6 +9,8 @@
 	"resolution":       [["resolution"], "rand"],
 	"cpu_type":			[["cpu_type"], "rand"],
 	"memory":			[["memory"], "rand"],
+	"gpu":				[["gpu"], "rand"],
+	"terminal":			[["terminal"], "rand"],
 	"desktop":			[["desktop"], "rand"],
 	"theme":			[["theme"], "rand"],
 	"icon":				[["icon"], "rand"],

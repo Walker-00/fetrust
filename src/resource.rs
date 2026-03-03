@@ -16,6 +16,9 @@ pub struct SystemInfos {
     pub font_name: String,
     pub cursor_theme: String,
     pub desktop: String,
+    pub host_model: String,
+    pub terminal: String,
+    pub gpu: String,
 }
 
 pub mod sys {
@@ -27,12 +30,18 @@ pub mod sys {
         path::Path,
         process::Command,
     };
-    pub fn init() -> SystemInfos {
-        let themes = get_themes();
+
+    /// Initialize system info collection.
+    /// 
+    /// # Arguments
+    /// * `probe` - If true, use external commands for enhanced accuracy.
+    ///            If false (default), use only file/env reads for maximum speed.
+    pub fn init(probe: bool) -> SystemInfos {
+        let themes = get_themes(probe);
 
         SystemInfos {
             os: get_os(),
-            os_release: get_release(),
+            os_release: get_release(probe),
             username: get_username(),
             hostname: get_hostname(),
             kernel_name: get_kernel_name(),
@@ -40,7 +49,7 @@ pub mod sys {
             shell: get_shell(),
             family: get_family(),
             uptime: get_uptime(),
-            resolution: get_res(),
+            resolution: get_res(probe),
             cpu_type: get_cput(),
             memory: get_memory(),
             theme_name: themes.name,
@@ -48,6 +57,9 @@ pub mod sys {
             font_name: themes.font,
             cursor_theme: themes.cursor,
             desktop: get_desktop(),
+            host_model: get_host_model(),
+            terminal: get_terminal(),
+            gpu: get_gpu(probe),
         }
     }
 
@@ -75,15 +87,37 @@ pub mod sys {
         return "NetBSD".to_string();
     }
 
+    /// Get OS release version.
+    /// 
+    /// FAST mode (probe=false): Parse /etc/os-release directly.
+    /// PROBE mode (probe=true): Try lsb_release command first, fallback to file.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn get_release() -> String {
-        let mut version = "unknown release".to_string();
-        if let Ok(release_d) = Command::new("lsb_release").arg("-sr").output() {
-            version = String::from_utf8(release_d.stdout)
-                .expect("ver")
-                .replace('\n', "");
-        } // gereksiz \n leri siler //turkish moment from creyde.sh
-        version
+    pub fn get_release(probe: bool) -> String {
+        if probe {
+            // PROBE: Try lsb_release command first
+            if let Ok(release_d) = Command::new("lsb_release").arg("-sr").output() {
+                let version = String::from_utf8_lossy(&release_d.stdout)
+                    .trim()
+                    .to_string();
+                if !version.is_empty() {
+                    return version;
+                }
+            }
+        }
+        
+        // FAST: Parse /etc/os-release directly (no external commands)
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            for line in content.lines() {
+                if line.starts_with("VERSION_ID=") {
+                    return line.trim_start_matches("VERSION_ID=")
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string();
+                }
+            }
+        }
+        
+        "unknown".to_string()
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -340,7 +374,6 @@ pub mod sys {
                     .pop()
                     .unwrap()
                     .to_string();
-                //or
                 val
             }
             _ => "Unknown".to_string(),
@@ -397,26 +430,118 @@ pub mod sys {
             "EUPTM".to_string()
         }
     }
-    #[cfg(target_os = "linux")]
-    pub fn get_res() -> String {
-        let output = Command::new("xrandr").output();
-        
-        let output = match output {
-            Ok(o) => o,
-            Err(_) => return "N/A".to_string(),
-        };
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Parse the output to find the current resolution (look for a line like "   1920x1080     60.00*+")
-        for line in stdout.lines() {
-            if line.contains("*") {
-                if let Some(res) = line.split_whitespace().next() {
-                    return res.to_string();
+    /// Get screen resolution.
+    /// 
+    /// FAST mode (probe=false): Returns "Unknown" (no external commands).
+    /// PROBE mode (probe=true): 
+    ///   - Hyprland: hyprctl monitors -j (focused monitor)
+    ///   - X11: xrandr (connected output with *)
+    ///   - Fallback: xdpyinfo
+    #[cfg(target_os = "linux")]
+    pub fn get_res(probe: bool) -> String {
+        if !probe {
+            // FAST mode: no external commands
+            return "Unknown".to_string();
+        }
+
+        // PROBE mode: use external commands
+        let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let hyprland_sig = env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap_or_default();
+        let is_hyprland = desktop.contains("Hyprland") || !hyprland_sig.is_empty();
+
+        if is_hyprland {
+            // Try hyprctl monitors -j (JSON output)
+            if let Ok(output) = Command::new("hyprctl").args(["monitors", "-j"]).output() {
+                if let Ok(json_str) = String::from_utf8(output.stdout) {
+                    let monitors: Vec<&str> = json_str.split('{').collect();
+                    let mut best_resolution = None;
+
+                    for monitor in monitors {
+                        if monitor.is_empty() {
+                            continue;
+                        }
+
+                        let is_focused = monitor.contains("\"focused\":true")
+                            || monitor.contains("\"focused\": true");
+
+                        let width = extract_json_number(monitor, "width");
+                        let height = extract_json_number(monitor, "height");
+
+                        if let (Some(w), Some(h)) = (width, height) {
+                            if is_focused {
+                                return format!("{}x{}", w, h);
+                            }
+                            if best_resolution.is_none() {
+                                best_resolution = Some(format!("{}x{}", w, h));
+                            }
+                        }
+                    }
+
+                    if let Some(res) = best_resolution {
+                        return res;
+                    }
                 }
             }
         }
-        "Unknown".to_string()
+
+        // Try xrandr
+        if let Ok(output) = Command::new("xrandr").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains(" connected") {
+                    if let Some(res_part) = line.split_whitespace().find(|s| s.contains('x')) {
+                        let res = res_part.split('+').next().unwrap_or(res_part);
+                        if res.contains('x') {
+                            return res.to_string();
+                        }
+                    }
+                }
+            }
+            for line in stdout.lines() {
+                if line.contains("*") {
+                    if let Some(res) = line.split_whitespace().next() {
+                        if res.contains('x') {
+                            return res.to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try xdpyinfo
+        if let Ok(output) = Command::new("xdpyinfo").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("dimensions:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    for part in parts {
+                        if part.contains('x') && part.contains(char::is_numeric) {
+                            return part.to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        "N/A".to_string()
+    }
+
+    /// Helper to extract a number from simple JSON-like text
+    fn extract_json_number(text: &str, key: &str) -> Option<u32> {
+        let search_key = format!("\"{}\":", key);
+        if let Some(start) = text.find(&search_key) {
+            let after_key = &text[start + search_key.len()..];
+            let after_key = after_key.trim_start();
+            let num_str: String = after_key.chars().take_while(|c| c.is_numeric()).collect();
+            if num_str.is_empty() {
+                None
+            } else {
+                num_str.parse().ok()
+            }
+        } else {
+            None
+        }
     }
 
     pub fn get_kernel_name() -> String {
@@ -428,13 +553,6 @@ pub mod sys {
         let family: String = String::from(std::env::consts::FAMILY);
         family
     }
-
-    // this only return cpu arch
-    /*#[cfg(not(target_os = "linux"))]
-    pub fn get_cput() -> String {
-        let cput: String = String::from(std::env::consts::ARCH);
-        cput
-    }*/
 
     #[cfg(target_os = "linux")]
     pub fn get_cput() -> String {
@@ -463,7 +581,6 @@ pub mod sys {
                 }
             }
 
-            // Format the clock rate based on its magnitude
             let clock_rate = if clock_rate_mhz >= 1000.0 {
                 format!("{:.3} GHz", clock_rate_mhz / 1000.0)
             } else {
@@ -473,7 +590,6 @@ pub mod sys {
             return format!("{} @ {}", model_name, clock_rate);
         }
 
-        // Return fallback if there's an error
         "ECPUI".to_string()
     }
 
@@ -523,16 +639,151 @@ pub mod sys {
             .output()
         {
             let model_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-            // macOS does not directly provide clock rate, so return only model name.
             return format!("{} @ Unknown Clock Rate", model_name);
         }
 
         "ECPUI".to_string()
     }
 
+    /// Get host model from DMI info (Linux).
+    /// Always uses file reads (no external commands) - fast by default.
+    #[cfg(target_os = "linux")]
+    pub fn get_host_model() -> String {
+        let mut vendor = String::new();
+        let mut product_name = String::new();
+        let mut product_version = String::new();
+
+        if let Ok(content) = std::fs::read_to_string("/sys/devices/virtual/dmi/id/sys_vendor") {
+            vendor = content.trim().to_string();
+        }
+        if let Ok(content) = std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name") {
+            product_name = content.trim().to_string();
+        }
+        if let Ok(content) = std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_version") {
+            product_version = content.trim().to_string();
+        }
+
+        let mut parts = Vec::new();
+        if !vendor.is_empty() && vendor != "Default String" && vendor != "To be filled by O.E.M." {
+            parts.push(vendor);
+        }
+        if !product_name.is_empty() && product_name != "Default String" && product_name != "To be filled by O.E.M." {
+            parts.push(product_name);
+        }
+        if !product_version.is_empty() && product_version != "Default String" && product_version != "To be filled by O.E.M." {
+            parts.push(product_version);
+        }
+
+        if parts.is_empty() {
+            "N/A".to_string()
+        } else {
+            parts.join(" ")
+        }
+    }
+
     #[cfg(not(target_os = "linux"))]
-    fn get_themes() -> Themes {
+    pub fn get_host_model() -> String {
+        "N/A".to_string()
+    }
+
+    /// Get terminal name from environment or parent process.
+    /// Always uses env/file reads (no external commands) - fast by default.
+    #[cfg(target_os = "linux")]
+    pub fn get_terminal() -> String {
+        if let Ok(term_program) = env::var("TERM_PROGRAM") {
+            return term_program;
+        }
+
+        if let Ok(term) = env::var("TERM") {
+            let term_clean = term.split('-').next().unwrap_or(&term).to_string();
+            if !term_clean.is_empty() && term_clean != "unknown" {
+                return term_clean;
+            }
+        }
+
+        if let Ok(ppid) = env::var("PPID") {
+            let comm_path = format!("/proc/{}/comm", ppid);
+            if let Ok(content) = std::fs::read_to_string(&comm_path) {
+                let terminal = content.trim().to_string();
+                if !terminal.is_empty() {
+                    return terminal;
+                }
+            }
+        }
+
+        if let Ok(ppid) = env::var("PPID") {
+            let stat_path = format!("/proc/{}/stat", ppid);
+            if let Ok(content) = std::fs::read_to_string(&stat_path) {
+                if let Some(start) = content.find(')') {
+                    let after_comm = &content[start + 1..];
+                    let parts: Vec<&str> = after_comm.split_whitespace().collect();
+                    if parts.len() > 1 {
+                        let grandparent_pid = parts[1];
+                        let gp_comm_path = format!("/proc/{}/comm", grandparent_pid);
+                        if let Ok(gp_content) = std::fs::read_to_string(&gp_comm_path) {
+                            let terminal = gp_content.trim().to_string();
+                            if !terminal.is_empty() {
+                                return terminal;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "N/A".to_string()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn get_terminal() -> String {
+        if let Ok(term) = env::var("TERM") {
+            return term.split('-').next().unwrap_or(&term).to_string();
+        }
+        "N/A".to_string()
+    }
+
+    /// Get GPU info.
+    /// 
+    /// FAST mode (probe=false): Returns "Unknown" (no lspci).
+    /// PROBE mode (probe=true): Runs lspci and parses VGA/3D/Display controller.
+    #[cfg(target_os = "linux")]
+    pub fn get_gpu(probe: bool) -> String {
+        if !probe {
+            // FAST mode: no external commands
+            return "Unknown".to_string();
+        }
+
+        // PROBE mode: use lspci
+        if let Ok(output) = Command::new("lspci").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("VGA compatible controller")
+                    || line.contains("3D controller")
+                    || line.contains("Display controller")
+                {
+                    if let Some(colon_pos) = line.find(':') {
+                        let after_colon = &line[colon_pos + 1..];
+                        if let Some(type_colon) = after_colon.find(':') {
+                            let gpu_name = after_colon[type_colon + 1..].trim();
+                            if !gpu_name.is_empty() {
+                                return gpu_name.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "N/A".to_string()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn get_gpu() -> String {
+        "N/A".to_string()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_themes(_probe: bool) -> Themes {
         let na = String::from("N/A");
         Themes {
             name: na.clone(),
@@ -542,59 +793,133 @@ pub mod sys {
         }
     }
 
+    /// Get theme info.
+    /// 
+    /// FAST mode (probe=false): Read only GTK 3.0/4.0 settings.ini files.
+    /// PROBE mode (probe=true): Also try gsettings commands and cursor fallback.
     #[cfg(target_os = "linux")]
-    fn get_themes() -> Themes {
+    fn get_themes(probe: bool) -> Themes {
         use crate::ini_parser::ini_parser;
 
-        let config_path = format!("{}/.config/gtk-3.0/settings.ini", env::var("HOME").unwrap_or_default());
-        
-        // Return N/A if config doesn't exist
-        if !Path::new(&config_path).exists() {
-            let na = String::from("N/A");
+        // Method 1: Try GTK 3.0 settings.ini (always, both modes)
+        let config_path_gtk3 = format!("{}/.config/gtk-3.0/settings.ini", env::var("HOME").unwrap_or_default());
+        if Path::new(&config_path_gtk3).exists() {
+            if let Ok(ini) = ini_parser(&config_path_gtk3) {
+                if let Some(section) = ini.get("Settings") {
+                    let theme_name = section.get("gtk-theme-name").cloned().unwrap_or_default();
+                    let icon_theme = section.get("gtk-icon-theme-name").cloned().unwrap_or_default();
+                    let font_name = section.get("gtk-font-name").cloned().unwrap_or_default();
+                    let cursor_theme = section.get("gtk-cursor-theme-name").cloned().unwrap_or_default();
+
+                    if !theme_name.is_empty() || !icon_theme.is_empty() {
+                        return Themes {
+                            name: if theme_name.is_empty() { "N/A".to_string() } else { theme_name },
+                            icon: if icon_theme.is_empty() { "N/A".to_string() } else { icon_theme },
+                            font: if font_name.is_empty() { "N/A".to_string() } else { font_name },
+                            cursor: if cursor_theme.is_empty() { "N/A".to_string() } else { cursor_theme },
+                        };
+                    }
+                }
+            }
+        }
+
+        // Method 2: Try GTK 4.0 settings.ini (always, both modes)
+        let config_path_gtk4 = format!("{}/.config/gtk-4.0/settings.ini", env::var("HOME").unwrap_or_default());
+        if Path::new(&config_path_gtk4).exists() {
+            if let Ok(ini) = ini_parser(&config_path_gtk4) {
+                if let Some(section) = ini.get("Settings") {
+                    let theme_name = section.get("gtk-theme-name").cloned().unwrap_or_default();
+                    let icon_theme = section.get("gtk-icon-theme-name").cloned().unwrap_or_default();
+                    let font_name = section.get("gtk-font-name").cloned().unwrap_or_default();
+                    let cursor_theme = section.get("gtk-cursor-theme-name").cloned().unwrap_or_default();
+
+                    if !theme_name.is_empty() || !icon_theme.is_empty() {
+                        return Themes {
+                            name: if theme_name.is_empty() { "N/A".to_string() } else { theme_name },
+                            icon: if icon_theme.is_empty() { "N/A".to_string() } else { icon_theme },
+                            font: if font_name.is_empty() { "N/A".to_string() } else { font_name },
+                            cursor: if cursor_theme.is_empty() { "N/A".to_string() } else { cursor_theme },
+                        };
+                    }
+                }
+            }
+        }
+
+        if !probe {
+            // FAST mode: no more fallbacks
             return Themes {
-                name: na.clone(),
-                icon: na.clone(),
-                font: na.clone(),
-                cursor: na.clone(),
+                name: "N/A".to_string(),
+                icon: "N/A".to_string(),
+                font: "N/A".to_string(),
+                cursor: "N/A".to_string(),
             };
         }
 
-        let ini = match ini_parser(&config_path) {
-            Ok(data) => data,
-            Err(_) => {
-                let na = String::from("N/A");
-                return Themes {
-                    name: na.clone(),
-                    icon: na.clone(),
-                    font: na.clone(),
-                    cursor: na.clone(),
-                };
-            }
-        };
+        // PROBE mode: Try gsettings (GNOME)
+        let mut theme_name = String::new();
+        let mut icon_theme = String::new();
+        let mut font_name = String::new();
+        let mut cursor_theme = String::new();
 
-        let section = match ini.get("Settings") {
-            Some(s) => s,
-            None => {
-                let na = String::from("N/A");
-                return Themes {
-                    name: na.clone(),
-                    icon: na.clone(),
-                    font: na.clone(),
-                    cursor: na.clone(),
-                };
-            }
-        };
+        if let Ok(output) = Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
+            .output()
+        {
+            theme_name = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string();
+        }
 
-        let theme_name = section.get("gtk-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
-        let icon_theme = section.get("gtk-icon-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
-        let font_name = section.get("gtk-font-name").cloned().unwrap_or_else(|| "N/A".to_string());
-        let cursor_theme = section.get("gtk-cursor-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
+        if let Ok(output) = Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "icon-theme"])
+            .output()
+        {
+            icon_theme = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string();
+        }
+
+        if let Ok(output) = Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "font-name"])
+            .output()
+        {
+            font_name = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string();
+        }
+
+        if let Ok(output) = Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "cursor-theme"])
+            .output()
+        {
+            cursor_theme = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string();
+        }
+
+        // Cursor theme fallback from ~/.icons/default/index.theme
+        if cursor_theme.is_empty() {
+            let cursor_config = format!("{}/.icons/default/index.theme", env::var("HOME").unwrap_or_default());
+            if Path::new(&cursor_config).exists() {
+                if let Ok(ini) = ini_parser(&cursor_config) {
+                    if let Some(section) = ini.get("Icon Theme") {
+                        if let Some(inherits) = section.get("Inherits") {
+                            cursor_theme = inherits.clone();
+                        }
+                    }
+                }
+            }
+        }
 
         Themes {
-            name: theme_name,
-            icon: icon_theme,
-            font: font_name,
-            cursor: cursor_theme,
+            name: if theme_name.is_empty() { "N/A".to_string() } else { theme_name },
+            icon: if icon_theme.is_empty() { "N/A".to_string() } else { icon_theme },
+            font: if font_name.is_empty() { "N/A".to_string() } else { font_name },
+            cursor: if cursor_theme.is_empty() { "N/A".to_string() } else { cursor_theme },
         }
     }
 
@@ -605,6 +930,6 @@ pub mod sys {
 
     #[cfg(target_os = "linux")]
     fn get_desktop() -> String {
-        env::var("XDG_CURRENT_DESKTOP").unwrap()
+        env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "N/A".to_string())
     }
 }
