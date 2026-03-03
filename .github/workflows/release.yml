@@ -1,40 +1,61 @@
-name: Build and Release Rust Binary
+name: Release Workflow
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+      - 'src/**'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+      - 'src/**'
 
 jobs:
-  test:
-    name: cargo test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo build --release
-
-  formatting:
-    name: cargo fmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - name: Rustfmt Check
-        uses: actions-rust-lang/rustfmt@v1
-
   release:
-    name: Release
-    needs: [test, formatting]
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo build --release
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+      # Step 1: Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Rust toolchain and cargo-release
+      - name: Set up Rust environment
+        uses: actions-rs/toolchain@v1
         with:
-          files: target/release/fetrust
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Install cargo-release
+        run: cargo install cargo-release
+
+      # Step 3: Build the project in release mode
+      - name: Build project
+        run: cargo build --release
+
+      # Step 4: Extract the version from Cargo.toml
+      - name: Extract version
+        id: version
+        run: |
+          current_version=$(grep -oP 'version\s*=\s*"\K[0-9\.]+' Cargo.toml)
+          echo "Current version: $current_version"
+          echo "version=$current_version" >> $GITHUB_ENV
+
+      # Step 5: Copy the built binary to the root project folder and overwrite if exists
+      - name: Move binary to project root
+        run: |
+          mkdir -p ./build
+          cp -f target/release/fetrust ./build/fetrust-${{ env.version }}
+
+      # Step 6: Upload the binary as an artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetrust-${{ env.version }}
+          path: ./build/fetrust-${{ env.version }}
+        
