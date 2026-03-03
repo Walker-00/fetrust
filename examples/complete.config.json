@@ -1,0 +1,45 @@
+// Example 4: Complete config with all available fields
+// 
+// Available fields:
+//   - username: Current user name
+//   - hostname: System hostname
+//   - os: Operating system name
+//   - os_release: OS version/release
+//   - kernel_name: Kernel name
+//   - kernel: Kernel version
+//   - shell: Current shell
+//   - family: OS family
+//   - uptime: System uptime
+//   - resolution: Display resolution
+//   - cpu_type: CPU model and speed
+//   - memory: Memory usage
+//   - desktop: Desktop environment
+//   - theme: GTK theme name
+//   - icon: Icon theme name
+//   - font: Font name
+//   - cursor: Cursor theme name
+//
+// Available colors:
+//   - black, red, green, yellow, blue, purple, cyan, white
+//   - rand or random: Random RGB color
+//
+// Config format:
+//   "key": [["field1", "field2"], "color"]
+//   Literal strings (like " @ ") are printed as-is
+//
+{
+	"user_a_host_name":	[["username", " @ ", "hostname"], "rand"],
+	"os":				  [["os", " ", "os_release"], "rand"],
+	"kernel":			[["kernel_name", " ", "kernel"], "rand"],
+	"shell":			[["shell"], "rand"],
+	"family":			[["family"], "cyan"],
+	"uptime":			[["uptime"], "rand"],
+	"resolution":       [["resolution"], "rand"],
+	"cpu_type":			[["cpu_type"], "rand"],
+	"memory":			[["memory"], "rand"],
+	"desktop":			[["desktop"], "rand"],
+	"theme":			[["theme"], "rand"],
+	"icon":				[["icon"], "rand"],
+	"font":				[["font"], "rand"],
+	"cursor":			[["cursor"], "rand"]
+}

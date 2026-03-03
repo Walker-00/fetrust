@@ -24,6 +24,7 @@ pub mod sys {
         env,
         fs::File,
         io::{BufRead, BufReader},
+        path::Path,
         process::Command,
     };
     pub fn init() -> SystemInfos {
@@ -298,7 +299,7 @@ pub mod sys {
         let mut hostname_str = "unknown hostname".to_string();
         match std::fs::read_to_string("/etc/hostname") {
             Ok(file) => {
-                hostname_str = file;
+                hostname_str = file.trim().to_string();
             }
             _ => {
                 if let Ok(host) = std::env::var("HOST") {
@@ -398,9 +399,13 @@ pub mod sys {
     }
     #[cfg(target_os = "linux")]
     pub fn get_res() -> String {
-        let output = Command::new("xrandr")
-            .output()
-            .expect("xrandr error");
+        let output = Command::new("xrandr").output();
+        
+        let output = match output {
+            Ok(o) => o,
+            Err(_) => return "N/A".to_string(),
+        };
+        
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         // Parse the output to find the current resolution (look for a line like "   1920x1080     60.00*+")
@@ -541,23 +546,55 @@ pub mod sys {
     fn get_themes() -> Themes {
         use crate::ini_parser::ini_parser;
 
-        let ini = ini_parser(&format!(
-            "{}/.config/gtk-3.0/settings.ini",
-            env::var("HOME").unwrap()
-        ))
-        .unwrap();
+        let config_path = format!("{}/.config/gtk-3.0/settings.ini", env::var("HOME").unwrap_or_default());
+        
+        // Return N/A if config doesn't exist
+        if !Path::new(&config_path).exists() {
+            let na = String::from("N/A");
+            return Themes {
+                name: na.clone(),
+                icon: na.clone(),
+                font: na.clone(),
+                cursor: na.clone(),
+            };
+        }
 
-        let section = ini.get("Settings").unwrap();
-        let theme_name = section.get("gtk-theme-name").unwrap();
-        let icon_theme = section.get("gtk-icon-theme-name").unwrap();
-        let font_name = section.get("gtk-font-name").unwrap();
-        let cursor_theme = section.get("gtk-cursor-theme-name").unwrap();
+        let ini = match ini_parser(&config_path) {
+            Ok(data) => data,
+            Err(_) => {
+                let na = String::from("N/A");
+                return Themes {
+                    name: na.clone(),
+                    icon: na.clone(),
+                    font: na.clone(),
+                    cursor: na.clone(),
+                };
+            }
+        };
+
+        let section = match ini.get("Settings") {
+            Some(s) => s,
+            None => {
+                let na = String::from("N/A");
+                return Themes {
+                    name: na.clone(),
+                    icon: na.clone(),
+                    font: na.clone(),
+                    cursor: na.clone(),
+                };
+            }
+        };
+
+        let theme_name = section.get("gtk-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
+        let icon_theme = section.get("gtk-icon-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
+        let font_name = section.get("gtk-font-name").cloned().unwrap_or_else(|| "N/A".to_string());
+        let cursor_theme = section.get("gtk-cursor-theme-name").cloned().unwrap_or_else(|| "N/A".to_string());
 
         Themes {
-            name: theme_name.to_string(),
-            icon: icon_theme.to_string(),
-            font: font_name.to_string(),
-            cursor: cursor_theme.to_string(),
+            name: theme_name,
+            icon: icon_theme,
+            font: font_name,
+            cursor: cursor_theme,
         }
     }
 

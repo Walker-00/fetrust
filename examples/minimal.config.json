@@ -1,0 +1,9 @@
+// Example 1: Minimal config - only essential info
+// Colors can be: black, red, green, yellow, blue, purple, cyan, white, rand (random)
+{
+	"user_a_host_name":	[["username", " @ ", "hostname"], "rand"],
+	"os":				  [["os", " ", "os_release"], "rand"],
+	"kernel":			[["kernel_name", " ", "kernel"], "white"],
+	"cpu_type":			[["cpu_type"], "white"],
+	"memory":			[["memory"], "white"]
+}

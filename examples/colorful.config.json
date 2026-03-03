@@ -1,0 +1,17 @@
+// Example 2: Colorful config - each line has a different color
+// Available colors: black, red, green, yellow, blue, purple, cyan, white, rand
+{
+	"user_a_host_name":	[["username", " @ ", "hostname"], "rand"],
+	"os":				  [["os", " ", "os_release"], "red"],
+	"kernel":			[["kernel_name", " ", "kernel"], "green"],
+	"shell":			[["shell"], "yellow"],
+	"family":			[["family"], "blue"],
+	"uptime":			[["uptime"], "purple"],
+	"cpu_type":			[["cpu_type"], "cyan"],
+	"memory":			[["memory"], "white"],
+	"desktop":			[["desktop"], "rand"],
+	"theme":			[["theme"], "rand"],
+	"icon":				[["icon"], "rand"],
+	"font":				[["font"], "rand"],
+	"cursor":			[["cursor"], "rand"]
+}

@@ -14,8 +14,3 @@ debug = false
 codegen-units = 1
 
 [dependencies]
-figlet-rs = "0.1.4"
-ansi_term = "0.12.1"
-tinyrand = "0.5"
-tinyrand-std = "0.5"
-another_json_minimal = "0.0.2"

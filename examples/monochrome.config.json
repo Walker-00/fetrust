@@ -1,0 +1,18 @@
+// Example 3: Monochrome config - all white text
+// Useful for minimal terminals or screenshots
+{
+	"user_a_host_name":	[["username", " @ ", "hostname"], "white"],
+	"os":				  [["os", " ", "os_release"], "white"],
+	"kernel":			[["kernel_name", " ", "kernel"], "white"],
+	"shell":			[["shell"], "white"],
+	"family":			[["family"], "white"],
+	"uptime":			[["uptime"], "white"],
+	"resolution":       [["resolution"], "white"],
+	"cpu_type":			[["cpu_type"], "white"],
+	"memory":			[["memory"], "white"],
+	"desktop":			[["desktop"], "white"],
+	"theme":			[["theme"], "white"],
+	"icon":				[["icon"], "white"],
+	"font":				[["font"], "white"],
+	"cursor":			[["cursor"], "white"]
+}
